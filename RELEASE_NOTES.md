@@ -21,7 +21,7 @@ Windows 上的划词翻译工具：在任意软件或网页里选中文字，光
 
 ### 附件
 
-- `MouseTranslate-v1.0.0-win64.zip` — 免安装依赖的完整包（含离线词库）
+- `MouseTranslate-v1.0.0-win64.zip` — 免注册、免 API key 的完整包（含离线词库）；Win10 若缺 WebView2 会提示并打开官方下载页
 - `dict.bin` — 离线词库（5.7 万词条 / 8.8 MB），供从源码构建时使用
 
 ### 已知说明

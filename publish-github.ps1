@@ -43,6 +43,7 @@ if (-not $ghLoggedIn) {
     exit 2
 }
 $owner = (& $gh api user -q .login).Trim()
+if (-not $owner) { Fail "无法获取 GitHub 用户名，请检查 gh auth 状态" }
 Info "已登录：$owner"
 
 Write-Host "== 2/7 替换 README 占位符 =="
@@ -94,7 +95,7 @@ $zip = Join-Path $root "release\MouseTranslate-v1.0.0-win64.zip"
 $dict = Join-Path $root "app\assets\dict.bin"
 $notes = Join-Path $root "RELEASE_NOTES.md"
 $assets = @()
-if (Test-Path $zip) { $assets += $zip } else { Info "缺少安装包 $zip（仍会创建 Release）" }
+if (Test-Path $zip) { $assets += $zip } else { Fail "缺少安装包：$zip" }
 if (Test-Path $dict) { $assets += $dict }
 
 $releaseArgs = @("release", "create", $Version)
@@ -103,7 +104,7 @@ $releaseArgs += @("--title", "$Version — 首个公开版本")
 if (Test-Path $notes) { $releaseArgs += @("--notes-file", $notes) }
 else { $releaseArgs += @("--notes", "首个公开版本：划词翻译 + 苹果玻璃质感 + 离线词库 + 自然语音朗读。") }
 & $gh @releaseArgs
-if ($LASTEXITCODE -ne 0) { Info "Release 可能已存在，尝试补传附件" }
+if ($LASTEXITCODE -ne 0) { Fail "创建 Release 失败（可能已存在同名 tag）" }
 
 Write-Host "== 6.5/7 校验 Release 附件 =="
 if (Test-Path $zip) {
