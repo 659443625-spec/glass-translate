@@ -8,14 +8,14 @@
 
 <br>
 
-[![Version](https://img.shields.io/badge/version-v1.0.0-8B5CF6?style=flat-square)](https://github.com/OWNER/glass-translate/releases/latest)
+[![Version](https://img.shields.io/badge/version-v1.0.0-8B5CF6?style=flat-square)](https://github.com/659443625-spec/glass-translate/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-6B7280?style=flat-square)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-6B7280?style=flat-square)
 ![Setup](https://img.shields.io/badge/setup-%E6%97%A0%E9%9C%80%E9%85%8D%E7%BD%AE-6B7280?style=flat-square)
 
 <br>
 
-### [⬇ 立即下载 Windows 版](https://github.com/OWNER/glass-translate/releases/latest)
+### [⬇ 立即下载 Windows 版](https://github.com/659443625-spec/glass-translate/releases/latest)
 
 <sub>Windows 10 / 11 · x64 · 下载 zip → 解压 → 双击 <code>安装.bat</code></sub>
 
@@ -27,13 +27,7 @@
 
 <p align="center"><sub>深色 / 浅色 · 跟随系统自动切换，并按背景亮度加厚，保持可读</sub></p>
 
-<!--
-  上线前请全局替换以下占位符：
-  · OWNER                                     → 真实 GitHub 用户名 / 组织名
-  · https://github.com/OWNER/glass-translate/releases/latest → 实际 Release 地址
-  · https://github.com/OWNER/glass-translate  → 实际仓库地址
-  文末另有 LEAD:OWNER 标记。
--->
+
 
 ---
 
@@ -86,7 +80,7 @@
 
 ## 30 秒上手
 
-1. **下载并解压**　在 [Release 页面](https://github.com/OWNER/glass-translate/releases/latest) 下载 `MouseTranslate-v1.0.0-win64.zip`，解压到任意文件夹。
+1. **下载并解压**　在 [Release 页面](https://github.com/659443625-spec/glass-translate/releases/latest) 下载 `MouseTranslate-v1.0.0-win64.zip`，解压到任意文件夹。
 2. **双击 `安装.bat`**　桌面会出现「鼠标翻译」图标；打开它，点面板上的「开始翻译」，窗口就收进托盘。首次运行如果出现「Windows 已保护你的电脑」，点「更多信息 → 仍要运行」就行。
 3. **划词试试**　在任意网页或软件里选中一段文字，点光标旁的小徽标。想听发音，按卡片右下角的「朗读」，再点一下即停。双击选词、三击选段也都能用。
 
@@ -171,7 +165,7 @@ glass-translate/
 **构建**
 
 ```powershell
-git clone https://github.com/OWNER/glass-translate.git
+git clone https://github.com/659443625-spec/glass-translate.git
 cd glass-translate
 powershell -File app\build.ps1
 ```
@@ -204,6 +198,6 @@ powershell -File app\install.ps1
 
 <p align="center"><strong>如果它帮你省下一点查词的时间，欢迎点一个 ⭐ Star。</strong></p>
 
-<p align="center"><a href="https://github.com/OWNER/glass-translate">github.com/OWNER/glass-translate</a></p>
+<p align="center"><a href="https://github.com/659443625-spec/glass-translate">github.com/659443625-spec/glass-translate</a></p>
 
-<!-- LEAD:OWNER -->
+
