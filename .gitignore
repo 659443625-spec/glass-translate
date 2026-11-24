@@ -1,0 +1,67 @@
+# ============================================================
+# 鼠标翻译 MouseTranslate —— 发布仓库忽略规则
+# ============================================================
+
+# ---------- 构建产物 / 二进制依赖（不入库） ----------
+
+# 编译输出（MouseTranslate.exe、随包 DLL、dict.bin、scripts 副本都由 build.ps1 生成）
+app/dist/
+
+# WebView2 SDK 二进制（体积大、可再获取；构建前按 README 说明放入 app/lib/）
+app/lib/
+
+# 离线词库：ECDICT 源 CSV 63 MB + 生成的 dict.bin 8.8 MB，均不入库
+# 生成方式见 app/data/README-词库生成.txt；dict.bin 也作为 Release 附件分发
+app/data/*
+!app/data/README-词库生成.txt
+app/assets/dict.bin
+
+# 本地发布包/压缩包（由发布流程生成，作为 GitHub Release 附件上传）
+release/
+
+# ---------- .NET / Visual Studio ----------
+.vs/
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.pdb
+
+# ---------- 运行期产物（程序写到 %APPDATA%\MouseTranslate 与 %TEMP%） ----------
+# settings.ini / history.json / vocab.json / crash.log / debug.log / TTS 缓存等
+*.log
+settings.ini
+history.json
+vocab.json
+crash.log
+tts-cache/
+MouseTranslate/
+selftest.txt
+dpi.txt
+probe.txt
+translate.txt
+
+# ---------- 调试 / 临时残留 ----------
+# 证据截图里的内部调试图与临时图不入库；app/docs 下正式展示图保留
+app/docs/_debug*
+app/docs/_exe-icon.png
+app/docs/_desktop-check.png
+app/docs/_tmp*
+
+# 一次性验证脚本与探针（正式工具在 app/tools/ 下保留）
+app/probe/
+_tmp*
+tmp-*
+*.tmp
+*.bak
+
+# v1 旧实现备份（不参与编译，仅本机留档，不入库）
+app/src-v1-backup/
+
+# ---------- 编辑器 / 系统垃圾 ----------
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp

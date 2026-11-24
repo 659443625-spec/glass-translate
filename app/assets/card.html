@@ -1,0 +1,855 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<style>
+/* ============================================================================
+   鼠标翻译 · 卡片 · Apple Liquid Glass
+   ----------------------------------------------------------------------------
+   平台事实：这是 WebView2 独立顶层窗口，不是宿主网页里的元素。
+   所以 CSS backdrop-filter 只能模糊“页面内部的层”，永远模糊不到窗口背后的桌面。
+   真正的桌面玻璃 = 宿主抓帧（Glass.Capture）→ 缩小 + 模糊 + 提饱和 → 作为 .lg-bg 贴图，
+   再叠半透明玻璃色；backdrop-filter 只用于底栏/按钮/横幅这些“卡片内部层”的局部透光。
+   样式隔离：WebView2 与宿主网页天然隔离（独立文档、独立 CSS 作用域），
+   本页除 html/body 宿主底板重置外，所有视觉规则都挂在 .lg- 前缀类名上，不写标签选择器。
+   ============================================================================ */
+html,body{background:transparent;overflow:hidden}
+html,body{margin:0;padding:0}
+body{
+  -webkit-font-smoothing:antialiased;user-select:none;cursor:default;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI",sans-serif;
+  /* 玻璃基色 / 描边 / 内高光 / 文字 —— 与 WebPanel.cs 的 LightAlpha/DarkAlpha 一一对应 */
+  --glass:rgba(255,255,255,.72);
+  --edge:rgba(255,255,255,.65);
+  --inner:rgba(255,255,255,.5);
+  --fg:#1d1d1f;
+  --fg2:rgba(29,29,31,.74);
+  --fg3:rgba(29,29,31,.58);
+  --line:rgba(29,29,31,.10);
+  --hover:rgba(29,29,31,.055);
+  --chip:rgba(255,255,255,.42);
+  --bar:rgba(255,255,255,.46);
+  --solid-chip:rgba(255,255,255,.96);
+  --accent:#007aff;
+  --accent-soft:rgba(0,122,255,.10);
+  --accent-line:rgba(0,122,255,.30);       /* 朗读按钮 loading：细描边 */
+  --accent-line-hi:rgba(0,122,255,.46);    /* 朗读按钮 loading hover 描边 */
+  --accent-hover:rgba(0,122,255,.14);      /* 朗读按钮 loading hover 底色 */
+  /* 朗读按钮 playing：vibrancy 半透明 tint（不再是实心高饱和底） */
+  --foot-bg:rgba(250,251,253,.97);
+  --play-bg:rgba(0,122,255,.12);
+  --play-bg-hover:rgba(0,122,255,.17);
+  --play-bg-active:rgba(0,122,255,.20);
+  --play-line:rgba(0,122,255,.30);
+  --play-line-hover:rgba(0,122,255,.38);
+  --play-inner:inset 0 1px 0 rgba(255,255,255,.55);
+  --play-fg:rgba(29,29,31,.92);
+  --play-ic:#007aff;
+  --star:#ff9f0a;
+  --star-soft:rgba(255,159,10,.14);
+  --toast-bg:rgba(24,25,30,.90);
+  --toast-fg:#fff;
+  --scroll:rgba(29,29,31,.18);
+}
+body.dark{
+  --glass:rgba(28,28,30,.76);
+  --edge:rgba(255,255,255,.16);
+  --inner:rgba(255,255,255,.5);
+  --fg:#f5f5f7;
+  --fg2:rgba(245,245,247,.78);
+  --fg3:rgba(245,245,247,.56);
+  --line:rgba(255,255,255,.12);
+  --hover:rgba(255,255,255,.08);
+  --chip:rgba(255,255,255,.07);
+  --bar:rgba(255,255,255,.06);
+  --solid-chip:rgba(36,36,40,.97);
+  --accent:#0a84ff;
+  --accent-soft:rgba(10,132,255,.16);
+  --accent-line:rgba(10,132,255,.34);
+  --accent-line-hi:rgba(10,132,255,.52);
+  --accent-hover:rgba(10,132,255,.22);
+  --foot-bg:rgba(26,27,31,.97);
+  --play-bg:rgba(10,132,255,.20);
+  --play-bg-hover:rgba(10,132,255,.26);
+  --play-bg-active:rgba(10,132,255,.30);
+  --play-line:rgba(10,132,255,.34);
+  --play-line-hover:rgba(10,132,255,.44);
+  --play-inner:inset 0 1px 0 rgba(255,255,255,.10);
+  --play-fg:rgba(245,245,247,.94);
+  --play-ic:#0a84ff;
+  --star:#ffa53a;
+  --star-soft:rgba(255,165,58,.16);
+  --scroll:rgba(255,255,255,.20);
+}
+/* 三档玻璃：0 标准 / 1 加厚 / 2 纯色兜底（C# 按抓帧统计算，WebUi.PickCardMode） */
+body.mode-1{--glass:rgba(255,255,255,.84)}
+body.mode-2{--glass:rgba(255,255,255,.94)}
+body.dark.mode-1{--glass:rgba(28,28,30,.86)}
+body.dark.mode-2{--glass:rgba(28,28,30,.95)}
+body.nobackdrop{--glass:rgba(255,255,255,.97)}       /* 抓帧失败：纯色兜底 ≥0.95 */
+body.dark.nobackdrop{--glass:rgba(28,28,30,.97)}
+
+/* ---------- 桌面玻璃：抓帧贴图 + 玻璃色 + 受光 ---------- */
+.lg-bg{position:fixed;left:-48px;top:-48px;right:-48px;bottom:-48px;
+  background-image:url(data:image/png;base64,{{BG}});
+  background-size:cover;background-position:center;
+  filter:blur(22px) saturate(150%) brightness(1.02);   /* 20~26px + 150%：去脏，不把底图染色 */
+  transform:scale(1.12)}
+body.nobackdrop .lg-bg{display:none}
+.lg-veil{position:fixed;inset:0;background:var(--glass);border-radius:20px}
+.lg-spec{position:fixed;inset:0;border-radius:20px;pointer-events:none;z-index:2;
+  background:radial-gradient(90% 55% at 13% -20%,rgba(255,255,255,.28),transparent 60%),
+             linear-gradient(160deg,rgba(255,255,255,.08),transparent 40%)}
+body.dark .lg-spec{background:radial-gradient(90% 55% at 13% -20%,rgba(255,255,255,.12),transparent 60%),
+             linear-gradient(160deg,rgba(255,255,255,.04),transparent 40%)}
+/* 玻璃厚度：1px 亮边 + inset 0 1px 0 顶部内高光 + 底部极淡内阴影 */
+.lg-edge{position:fixed;inset:0;border-radius:20px;pointer-events:none;z-index:9;
+  border:1px solid var(--edge);
+  box-shadow:inset 0 1px 0 var(--inner),inset 0 -18px 28px -24px rgba(0,0,0,.16)}
+body.pinned .lg-edge{border-color:rgba(0,122,255,.42);
+  box-shadow:inset 0 1px 0 var(--inner),inset 0 0 0 1px var(--accent-soft)}
+body.dark.pinned .lg-edge{border-color:rgba(10,132,255,.46)}
+
+/* ---------- 可滚动内容层 ---------- */
+.lg-scroll{position:relative;z-index:3;max-height:100vh;overflow-y:auto;overflow-x:hidden;
+  padding:0 20px 8px;border-radius:20px}
+/* 作用域内的盒模型重置（只作用于本卡片内容，不写全局 * 选择器） */
+.lg-scroll,.lg-scroll *{box-sizing:border-box}
+.lg-scroll::-webkit-scrollbar{width:4px}
+.lg-scroll::-webkit-scrollbar-thumb{background:transparent;border-radius:2px;
+  transition:background 220ms cubic-bezier(.22,1,.36,1)}
+.lg-scroll.scrolling::-webkit-scrollbar-thumb{background:var(--scroll)}
+.lg-scroll::-webkit-scrollbar-track{background:transparent}
+.lg-inner{transform-origin:50% 0}
+/* 出现/新取词：内容 160ms 入场（scale .96→1 + 上移 4px） */
+@keyframes lgIn{from{opacity:0;transform:scale(.96) translateY(4px)}to{opacity:1;transform:none}}
+.lg-inner.lg-in{animation:lgIn 160ms cubic-bezier(.22,1,.36,1) both}
+/* 结果到达：只做 120ms 内容淡入，不缩放，避免位移叠位移。
+   只挂在 .lg-body（正文 + 底栏）上：工具条/标题不跟着淡，也不会和入场动画打架。 */
+@keyframes lgRes{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+.lg-body.lg-res{animation:lgRes 120ms cubic-bezier(.22,1,.36,1) both}
+
+/* ---------- 顶部拖拽条 ---------- */
+.lg-grab{position:fixed;left:50%;top:5px;width:38px;height:5px;margin-left:-19px;border-radius:3px;
+  background:var(--fg3);opacity:.42;cursor:grab;z-index:7;
+  transition:opacity 160ms cubic-bezier(.22,1,.36,1),transform 160ms cubic-bezier(.22,1,.36,1)}
+.lg-grab:hover{opacity:.8;transform:scaleX(1.12)}
+.lg-grab:active{cursor:grabbing;opacity:1}
+
+/* ---------- 工具条 ---------- */
+.lg-bar{display:flex;align-items:center;gap:2px;padding:6px 0;min-height:36px}
+.lg-ic{width:28px;height:28px;border:none;border-radius:9px;background:transparent;color:var(--fg2);
+  cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex:0 0 auto;
+  transition:transform 120ms cubic-bezier(.22,1,.36,1),background 120ms cubic-bezier(.22,1,.36,1),color 120ms cubic-bezier(.22,1,.36,1)}
+.lg-ic svg{width:17px;height:17px;display:block}
+.lg-ic:hover{background:var(--hover);color:var(--fg);transition-duration:150ms;
+  -webkit-backdrop-filter:blur(14px) saturate(170%);backdrop-filter:blur(14px) saturate(170%)}
+.lg-ic:active{transform:scale(.92)}
+.lg-ic.lg-records{margin-right:auto}
+.lg-ic.on{color:#fff;background:var(--accent)}
+.lg-ic.lg-on-star{color:var(--star);background:var(--star-soft)}
+.lg-ic.lg-on-star svg path{fill:var(--star);stroke:var(--star)}
+/* 复制成功：图标切绿色对勾 1200ms 后复原 */
+.lg-ic.lg-ok{color:#30d158;background:rgba(48,209,88,.14)}
+.lg-ic.lg-ok:hover{color:#30d158;background:rgba(48,209,88,.18)}
+.lg-pin-tag{display:none;align-items:center;height:18px;padding:0 8px;margin-right:auto;
+  border-radius:9px;background:var(--accent-soft);color:var(--accent);
+  font-size:10px;font-weight:600;letter-spacing:.2px}
+body.pinned .lg-pin-tag{display:inline-flex}
+body.pinned .lg-ic.lg-records{margin-right:0}
+body.pinned .lg-ic.lg-pin{color:#fff;background:var(--accent)}
+
+/* ---------- 内容 ---------- */
+.lg-content{padding:0}
+.lg-word{font-family:"Segoe UI Variable Display","SF Pro Display","SF Pro Text","PingFang SC","Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI",sans-serif;
+  font-size:26px;font-weight:700;letter-spacing:-.2px;line-height:1.22;color:var(--fg);
+  padding-top:4px;word-break:break-word}
+.lg-phon{font-size:12.5px;color:var(--fg2);margin-top:4px;letter-spacing:.2px}
+.lg-hr{height:1px;margin:13px 0;background:var(--line);
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent)}
+/* 词性不再用蓝胶囊：小号大写、三级灰，克制 */
+.lg-pos{display:block;background:transparent;color:var(--fg3);font-size:10.5px;font-weight:600;
+  letter-spacing:.6px;text-transform:uppercase;margin:13px 0 5px;padding:0;height:auto}
+.lg-sense{display:flex;align-items:flex-start;gap:9px;font-size:14.5px;line-height:1.55;
+  color:var(--fg);margin-top:3px}
+.lg-dot{flex:0 0 auto;width:4px;height:4px;margin-top:calc(1.55em / 2 - 2px);
+  border-radius:50%;background:var(--fg3)}
+.lg-muted{color:var(--fg2)}
+/* 统一空态容器：查不到 / 无内容 */
+.lg-empty{padding:14px;color:var(--fg2);font-size:13px;line-height:1.55}
+/* 失败态：不再用 16.5px 当译文，改成带左侧红边的说明块 */
+.lg-error{margin-top:4px;padding:10px 12px;border-radius:10px;background:rgba(255,69,58,.08);
+  border-left:2px solid rgba(255,69,58,.65)}
+.lg-error-t{font-size:11.5px;font-weight:600;line-height:1.5;color:#ff453a;letter-spacing:.1px}
+.lg-error-d{margin-top:3px;font-size:12.5px;line-height:1.5;color:var(--fg2);white-space:pre-line;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+/* 加载态：3 个 4px 圆点，1.2s 呼吸 + 上移 2px */
+.lg-loading{display:flex;align-items:center;min-height:24px;padding:2px 0}
+.lg-dots{display:inline-flex;align-items:center;gap:4px}
+.lg-dots i{width:4px;height:4px;border-radius:50%;background:var(--fg3);opacity:.35;
+  animation:lgDot 1.2s ease-in-out infinite}
+.lg-dots i:nth-child(2){animation-delay:.15s}
+.lg-dots i:nth-child(3){animation-delay:.3s}
+@keyframes lgDot{0%,100%{opacity:.35;transform:translateY(0)}50%{opacity:.85;transform:translateY(-2px)}}
+.lg-src{font-size:13px;line-height:1.55;color:var(--fg2);padding-top:4px}
+.lg-tr{font-size:17px;line-height:1.58;color:var(--fg);margin-top:3px}
+/* 底栏贴在滚动视口底部：长文滚动时朗读入口恒在（保留顶部细线 / --bar / 局部玻璃 / 内高光）。
+   吸底后底栏会压在滚动正文上：--bar 本身很淡，所以再垫一层 --glass 玻璃材质，
+   保证没有 GPU 模糊（软件渲染）时正文也不会从底栏里透出来；有 backdrop-filter 时再叠一层模糊。
+   ::after 把底栏材质往下补满 .lg-scroll 的 8px 底部内边距 —— 吸底时正文不会从底栏下沿露出一条。 */
+.lg-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  position:sticky;bottom:0;z-index:5;
+  margin:16px -20px 0;padding:9px 20px 8px;border-top:1px solid var(--line);
+  background:linear-gradient(var(--bar),var(--bar)),var(--foot-bg);
+  -webkit-backdrop-filter:blur(18px) saturate(180%);backdrop-filter:blur(18px) saturate(180%)}
+.lg-foot::after{content:'';position:absolute;left:0;right:0;bottom:-8px;height:8px;
+  background:inherit;pointer-events:none}
+.lg-meta{display:flex;align-items:center;min-width:0;flex:1 1 auto;
+  font-size:11px;color:var(--fg3);white-space:nowrap;
+  letter-spacing:0;font-variant-numeric:tabular-nums}
+/* meta 纯文本部分：过长时省略，token/箭头不参与压缩之外的重排 */
+.lg-meta-tx,.lg-meta-rest{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 语向 token：20×20 热区（padding 4px 2px）/ 11px / 三级灰；hover·focus → 一级 */
+.lg-dir{display:inline-flex;align-items:center;flex:0 0 auto}
+.lg-tk{appearance:none;-webkit-appearance:none;display:inline-flex;align-items:center;justify-content:center;
+  width:20px;height:20px;padding:4px 2px;margin:0;border:0;border-radius:6px;background:transparent;
+  color:var(--fg3);font:inherit;font-size:11px;line-height:12px;letter-spacing:0;cursor:pointer;
+  transition:color 120ms cubic-bezier(.22,1,.36,1),background 120ms cubic-bezier(.22,1,.36,1),
+    transform 120ms cubic-bezier(.22,1,.36,1)}
+.lg-tk:hover,.lg-tk:focus-visible{color:var(--fg)}
+.lg-tk:focus-visible{outline:none}
+.lg-tk:active{transform:scale(.96)}
+/* 正在朗读的那一侧用 accent 着色（hover 优先级不盖过它） */
+.lg-tk.on,.lg-tk.on:hover,.lg-tk.on:focus-visible{color:var(--accent)}
+.lg-tk[disabled]{pointer-events:none;cursor:default;opacity:.5}
+.lg-arr{flex:0 0 auto;margin:0 1px;color:var(--fg3)}
+.lg-reads{display:flex;gap:6px;flex-shrink:0}
+/* ---------- 朗读按钮：idle / loading / playing 三态（方案 B · 单主入口） ----------
+   idle     细线条喇叭 + 文案「朗读」（1.6 线宽 / round 端点，与工具条同一套画法）
+   loading  3 根静态短声波 + 整体 opacity 呼吸（替换喇叭脉冲），文案保持「朗读」，再点 = 停止
+   playing  3 根声波律动 + 文案「停止」；hover 声波 120ms 淡出、accent 实心停止方块淡入
+   三态只切类名：图标/文案都同格叠放 → 宽高零跳动；
+   文案槽用隐藏的长文案占位定宽，「朗读 / 停止」用两枚 span 交叉淡入，不做 textContent 硬切。
+   播放态是 vibrancy tint（半透明 accent 底 + 细描边 + 顶部内高光），不是实心高饱和底；
+   按钮自身不叠 backdrop-filter，避免和底栏玻璃双层模糊发灰。 */
+.lg-rd{display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  height:28px;padding:0 12px;border-radius:9px;border:1px solid var(--line);background:var(--chip);
+  color:var(--fg2);font-size:12px;font-family:inherit;cursor:pointer;white-space:nowrap;
+  box-shadow:inset 0 1px 0 var(--inner),0 1px 2px rgba(16,24,40,.05);
+  transition:background 160ms cubic-bezier(.22,1,.36,1),border-color 160ms cubic-bezier(.22,1,.36,1),
+    color 160ms cubic-bezier(.22,1,.36,1),box-shadow 160ms cubic-bezier(.22,1,.36,1),
+    transform 120ms cubic-bezier(.22,1,.36,1)}
+.lg-rd:hover{background:var(--hover);color:var(--fg)}
+.lg-rd:active{transform:scale(.96)}
+/* 图标盒 16×16：喇叭 / 三根声波 / 停止方块同格叠放，切态 120ms 交叉淡入 */
+.lg-rd-ic{display:inline-grid;place-items:center;width:16px;height:16px;flex:0 0 16px}
+.lg-rd-i{grid-area:1/1;width:16px;height:16px;display:block;opacity:0;
+  transition:opacity 120ms cubic-bezier(.22,1,.36,1)}
+.lg-rd-i-spk{opacity:1}
+.lg-rd-i-stp{opacity:0;color:var(--play-ic)}
+/* 3 根声波：14×14 容器居中，bar 宽 2px / 圆角 1px / 基高 6·10·7，transform-origin center */
+.lg-rd-wv{grid-area:1/1;display:inline-flex;align-items:center;justify-content:center;gap:2px;
+  width:14px;height:14px;opacity:0;transition:opacity 120ms cubic-bezier(.22,1,.36,1)}
+.lg-rd-wv i{width:2px;border-radius:1px;background:var(--play-ic);transform-origin:center;
+  will-change:transform}
+.lg-rd-wv i:nth-child(1){height:6px;--pk:1;--dur:640ms;--dly:0ms}
+.lg-rd-wv i:nth-child(2){height:10px;--pk:1.15;--dur:760ms;--dly:-180ms}
+.lg-rd-wv i:nth-child(3){height:7px;--pk:.95;--dur:680ms;--dly:-360ms}
+@keyframes lgWv{0%{transform:scaleY(.5)}50%{transform:scaleY(var(--pk,1))}100%{transform:scaleY(.55)}}
+@keyframes lgWvBreath{0%,100%{opacity:.45}50%{opacity:.85}}
+/* 文案槽：隐藏占位定宽 + 两枚可见文案同格叠放（左对齐，三态切换文字不横跳） */
+.lg-rd-lb{display:inline-grid;align-items:center;justify-items:start}
+.lg-rd-lb>*{grid-area:1/1;white-space:nowrap}
+.lg-rd-sz{visibility:hidden}
+.lg-rd-tx{transition:opacity 120ms cubic-bezier(.22,1,.36,1)}
+.lg-rd-tx-stop{opacity:0}
+/* loading：3 根静态短声波 + 整体 1.4s 呼吸，文案保持「朗读」，再点 = 停止 */
+.lg-rd.on-loading{color:var(--fg);border-color:var(--accent-line);background:var(--accent-soft)}
+.lg-rd.on-loading:hover{background:var(--accent-hover);border-color:var(--accent-line-hi)}
+.lg-rd.on-loading .lg-rd-i-spk{opacity:0}
+.lg-rd.on-loading .lg-rd-wv{opacity:1;animation:lgWvBreath 1.4s ease-in-out infinite}
+.lg-rd.on-loading .lg-rd-wv i{animation:none;transform:none}
+.lg-rd.on-loading .lg-rd-i-stp{opacity:0}
+/* playing：vibrancy tint + 声波律动 + 文案「停止」；hover 时声波淡出、停止方块淡入（动画相位不重置） */
+.lg-rd.on-playing{color:var(--play-fg);background:var(--play-bg);border-color:var(--play-line);
+  box-shadow:var(--play-inner),0 1px 2px rgba(16,24,40,.05)}
+.lg-rd.on-playing:hover{background:var(--play-bg-hover);border-color:var(--play-line-hover);color:var(--play-fg)}
+.lg-rd.on-playing:active{background:var(--play-bg-active);transform:scale(.96)}
+.lg-rd.on-playing .lg-rd-i-spk{opacity:0}
+.lg-rd.on-playing .lg-rd-wv{opacity:1}
+.lg-rd.on-playing .lg-rd-wv i{animation-name:lgWv;animation-duration:var(--dur);
+  animation-delay:var(--dly);animation-timing-function:cubic-bezier(.45,0,.55,1);
+  animation-iteration-count:infinite;animation-fill-mode:both}
+.lg-rd.on-playing:hover .lg-rd-wv{opacity:0}
+.lg-rd.on-playing .lg-rd-i-stp{opacity:0}
+.lg-rd.on-playing:hover .lg-rd-i-stp{opacity:1}
+.lg-rd.on-playing .lg-rd-tx-idle{opacity:0}
+.lg-rd.on-playing .lg-rd-tx-stop{opacity:1}
+/* 句子翻译失败：朗读入口没有意义，置灰不可点（不新增按钮/功能） */
+.lg-rd.lg-rd-off{opacity:.45;pointer-events:none;cursor:default}
+.lg-rd.lg-rd-off:hover{background:var(--chip);color:var(--fg2)}
+
+/* ---------- 截断横幅（贴卡片底部的局部玻璃条） ---------- */
+.lg-banner{position:fixed;left:0;right:0;bottom:0;display:none;align-items:center;gap:8px;
+  padding:9px 20px 11px;border-radius:0 0 20px 20px;border-top:1px solid var(--line);
+  background:var(--bar);color:var(--fg2);font-size:11.5px;line-height:1.35;z-index:6;
+  -webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%);
+  box-shadow:inset 0 1px 0 var(--inner),0 -10px 24px -18px rgba(0,0,0,.28)}
+.lg-banner.lg-show{display:flex}
+.lg-banner i{flex:0 0 auto;width:5px;height:5px;border-radius:50%;background:var(--star)}
+/* 给横幅让出高度（测量用 inner.offsetHeight + padding，和 CSS 里这个数保持一致）。
+   截断态横幅 fixed 在卡底（实测高 36.19 CSS），这里把 46px 底部留白拆成
+   「滚动内边距 10 + 吸底栏避让 36」：吸底栏 bottom:36px 才能真正把它抬到横幅上方，
+   又不会和 padding 双抬升（sticky bottom 的相对基准是 scrollport 的 content box）。
+   总留白仍是 46px；胶囊整体在横幅上方，滚到最大位置底栏回到文末，不出现“双底条”。
+   ::after 补满底栏到横幅之间的视觉缝（吸底时正文不会从缝里露出来）；横幅只作提示、不放行指针。 */
+body.truncated .lg-scroll{padding-bottom:10px}
+body.truncated .lg-body{padding-bottom:36px}
+body.truncated .lg-foot{bottom:36px;z-index:7}
+body.truncated .lg-foot::after{bottom:-12px;height:12px}
+body.truncated .lg-banner{pointer-events:none}
+body.truncated .lg-toast{bottom:96px}
+
+/* ---------- toast（局部玻璃胶囊） ---------- */
+.lg-toast{position:fixed;left:50%;bottom:56px;z-index:8;
+  transform:translateX(-50%) translateY(6px) scale(.96);opacity:0;
+  background:var(--toast-bg);color:var(--toast-fg);font-size:11.5px;
+  padding:6px 14px;border-radius:20px;max-width:82%;text-align:center;
+  -webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%);
+  box-shadow:0 1px 2px rgba(0,0,0,.10),0 10px 30px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.18);
+  transition:opacity 200ms cubic-bezier(.22,1,.36,1),transform 200ms cubic-bezier(.22,1,.36,1);
+  pointer-events:none}
+.lg-toast.lg-show{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}
+
+/* ---------- 兜底：没有 backdrop-filter 时内部小件退回接近纯色（不能变透明） ---------- */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  body.light,body.light.mode-0,body.light.mode-1,body.light.mode-2{--glass:rgba(255,255,255,.96)}
+  body.dark,body.dark.mode-0,body.dark.mode-1,body.dark.mode-2{--glass:rgba(28,28,30,.96)}
+  body.light{--chip:rgba(255,255,255,.97);--bar:rgba(255,255,255,.97);--hover:rgba(29,29,31,.07)}
+  body.dark{--chip:rgba(40,40,44,.97);--bar:rgba(30,30,33,.97);--hover:rgba(255,255,255,.10)}
+  .lg-ic:hover{background:var(--chip)}
+  .lg-banner{background:var(--bar)}
+  .lg-toast{background:#15161a}
+}
+/* 系统主题兜底：C# 会带 light/dark class（源是系统 AppsUseLightTheme，与 prefers-color-scheme 同源），
+   万一模板没带 class，这里兜一层，避免浅色字压在浅色玻璃上。 */
+@media (prefers-color-scheme:dark){
+  body:not(.light):not(.dark){
+    --glass:rgba(28,28,30,.76);--edge:rgba(255,255,255,.16);--inner:rgba(255,255,255,.5);
+    --fg:#f5f5f7;--fg2:rgba(245,245,247,.78);--fg3:rgba(245,245,247,.56);
+    --line:rgba(255,255,255,.12);--hover:rgba(255,255,255,.08);
+    --chip:rgba(255,255,255,.07);--bar:rgba(255,255,255,.06);
+    --accent:#0a84ff;--accent-soft:rgba(10,132,255,.16);
+    --foot-bg:rgba(26,27,31,.97);
+  --play-bg:rgba(10,132,255,.20);--play-bg-hover:rgba(10,132,255,.26);
+    --play-bg-active:rgba(10,132,255,.30);
+    --play-line:rgba(10,132,255,.34);--play-line-hover:rgba(10,132,255,.44);
+    --play-inner:inset 0 1px 0 rgba(255,255,255,.10);
+    --play-fg:rgba(245,245,247,.94);--play-ic:#0a84ff}
+}
+@media (prefers-reduced-motion:reduce){
+  .lg-inner.lg-in,.lg-body.lg-res{animation:none}
+  .lg-dots i{animation:none}
+  /* 减少动效：声波冻结成静态三柱；过渡 1ms */
+  .lg-rd.on-loading .lg-rd-wv{animation:none;opacity:.72}
+  .lg-rd.on-playing .lg-rd-wv i{animation:none;transform:none}
+  .lg-ic,.lg-rd,.lg-grab,.lg-toast,.lg-rd-i,.lg-rd-wv,.lg-rd-tx,.lg-tk{transition-duration:1ms}
+}
+</style>
+</head>
+<body class="{{CLS}}">
+<div class="lg-bg" id="lg-bg"></div>
+<div class="lg-veil"></div>
+<div class="lg-spec"></div>
+<div class="lg-grab" id="grab" title="拖动卡片"></div>
+<div class="lg-scroll" id="wrap">
+  <div class="lg-inner lg-in" id="inner">
+    <div class="lg-bar">
+      <button class="lg-ic lg-records" id="records" title="翻译记录 / 生词本">
+        <svg viewBox="0 0 16 16"><path d="M7.18 3.32A4.75 4.75 0 1 1 3.7 5.99" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.81 2.47L7.18 3.32 6.21 4.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 5.44V8.18l1.92 1.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="lg-pin-tag" id="pinTag">已固定</span>
+      <button class="lg-ic lg-copy" id="copy" title="复制">
+        <svg viewBox="0 0 16 16"><rect x="5.8" y="3.8" width="6.4" height="7.6" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.8 6v4.4a1.7 1.7 0 0 0 1.7 1.7h4.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="lg-ic lg-star" id="star" title="收藏到生词本">
+        <svg viewBox="0 0 16 16"><path d="M8 3.2l1.38 2.9 3.19.42-2.33 2.21.66 3.09L8 10.35l-2.88 1.37.66-3.09-2.33-2.21 3.19-.42z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="lg-ic lg-pin" id="pin" title="固定到屏幕">
+        <svg viewBox="0 0 16 16"><path d="M6.52 3.11h2.95l-.74 3.19 2.13 1.39v.9H5.13v-.9l2.13-1.39-.74-3.19z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 9.07v2.78" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="lg-ic lg-close" id="close" title="关闭">
+        <svg viewBox="0 0 16 16"><path d="M4.6 4.6l6.8 6.8M11.4 4.6l-6.8 6.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+    <div class="lg-body" id="body">
+      <div class="lg-content" id="content"></div>
+      <div class="lg-foot" id="foot" style="display:none">
+        <span class="lg-meta" id="meta"></span>
+        <span class="lg-reads" id="reads"></span>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="lg-banner" id="trunc"><i></i><span>原文过长，仅翻译前 1200 字</span></div>
+<div class="lg-toast" id="toast"></div>
+<script>
+var cur = {}, pinned = false;
+function byId(id){ return document.getElementById(id); }
+function esc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function post(o){ window.chrome.webview.postMessage(JSON.stringify(o)); }
+
+/* 工具条图标（1.6 线宽 / 圆端点）：复制图标在成功后临时换成绿色对勾 */
+var ICON_COPY = '<svg viewBox="0 0 16 16"><rect x="5.8" y="3.8" width="6.4" height="7.6" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.8 6v4.4a1.7 1.7 0 0 0 1.7 1.7h4.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+var ICON_CHECK = '<svg viewBox="0 0 16 16"><path d="M3.4 8.4l3 3 6.2-6.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/* ---------- 朗读按钮图标（16 网格，1:1 显示 → 线宽 1.6px / round 端点，与工具条同一套画法）
+   喇叭：细线条外轮廓 + 一道圆弧声波（克制，不抢文案）
+   声波：3 根 2px 短柱（基高 6/10/7，14×14 容器居中），playing 时律动、hover 时淡出换停止方块
+   停止：8.2×8.2 / 圆角 2.2 的 accent 实心方块（16 网格居中 = 原 14 网格里的 x/y≈2.9） ---------- */
+var ICON_SPK = '<svg class="lg-rd-i lg-rd-i-spk" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.37 6.4h2.06l3.14-2.62a.71.71 0 0 1 1.14.54v8.06a.71.71 0 0 1-1.14.54L5.43 10.3H3.37A1.28 1.28 0 0 1 2.09 9.02V7.68A1.28 1.28 0 0 1 3.37 6.4Z"/><path d="M11.43 6.11a3.14 3.14 0 0 1 0 4.46"/></svg>';
+var ICON_WAVE = '<span class="lg-rd-wv" aria-hidden="true"><i></i><i></i><i></i></span>';
+var ICON_STOP = '<svg class="lg-rd-i lg-rd-i-stp" viewBox="0 0 16 16"><rect x="3.9" y="3.9" width="8.2" height="8.2" rx="2.2" fill="currentColor"/></svg>';
+
+/* ---------- 朗读三态（方案 B：单主入口 + 语言 token） ----------
+   speakState：C# 通过 window.__setSpeak(state) 推 'idle' | 'loading' | 'playing'
+   speakBtn  ：当前处于 loading/playing 的主胶囊（单词卡 rw；句子卡 rs）
+   readSide  ：这次朗读的对象：'w' 单词 / 's' 原文 / 't' 译文 —— 决定 meta token 的 accent 与胶囊默认目标
+   lastSpoken：最后一次发起朗读的胶囊，C# 只推状态不说是哪个目标时用它补位
+   句子卡全卡只有一个喇叭入口；「读原文 / 读译文」改成 meta 里的两枚语言 token。 */
+var speakState = 'idle';
+var speakBtn = '';
+var readSide = 's';
+var lastSpoken = '';
+
+function speakPillHtml(id, label){
+  return '<button type="button" class="lg-rd" id="' + id + '" title="' + label + '">' +
+    '<span class="lg-rd-ic" aria-hidden="true">' + ICON_SPK + ICON_WAVE + ICON_STOP + '</span>' +
+    '<span class="lg-rd-lb"><span class="lg-rd-sz" aria-hidden="true">' + label + '</span>' +
+    '<span class="lg-rd-tx lg-rd-tx-idle">' + label + '</span>' +
+    '<span class="lg-rd-tx lg-rd-tx-stop">停止</span></span>' +
+    '</button>';
+}
+
+function hasHan(s){ return /[\u3400-\u9fff\uf900-\ufaff]/.test(String(s == null ? '' : s)); }
+
+/* 当前朗读目标：单词卡读单词；句子卡读 readSide 指定的原文/译文 */
+function speakTarget(side){
+  if (cur.mode === 'word') return { text: cur.word || '', zh: hasHan(cur.word) };
+  var t = (side === 't') ? cur.translation : cur.source;
+  return { text: (t == null ? '' : String(t)), zh: hasHan(t) };
+}
+
+/* 把状态画到胶囊与 meta token 上（文案不硬切：由 CSS 交叉淡入；这里只切类名 / title / aria） */
+function paintSpeak(){
+  var ids = ['rw', 'rs'];
+  for (var i = 0; i < ids.length; i++) {
+    var b = byId(ids[i]);
+    if (!b) continue;
+    var st = (speakBtn === ids[i]) ? speakState : 'idle';
+    b.classList.toggle('on-loading', st === 'loading');
+    b.classList.toggle('on-playing', st === 'playing');
+    var idle = (cur.mode === 'sentence')
+      ? (readSide === 't' ? '朗读译文' : '朗读原文')
+      : '朗读';
+    if (b.classList.contains('lg-rd-off')) {
+      b.removeAttribute('title');
+      b.setAttribute('aria-label', '朗读');
+      b.setAttribute('aria-pressed', 'false');
+      continue;
+    }
+    /* playing / loading 的 title 都能读出「再点一次 = 停止」这层意思 */
+    b.title = st === 'playing' ? '停止朗读 · 再点停止'
+            : st === 'loading' ? '准备中 · 再点停止'
+            : idle;
+    b.setAttribute('aria-label', b.title);
+    b.setAttribute('aria-pressed', (st === 'loading' || st === 'playing') ? 'true' : 'false');
+  }
+  /* 正在朗读的那一侧 token 用 accent 着色；空闲时统一三级灰 */
+  var active = (speakState === 'loading' || speakState === 'playing') && !!speakBtn;
+  paintToken('s', active && readSide === 's');
+  paintToken('t', active && readSide === 't');
+}
+
+function paintToken(side, on){
+  var b = byId('tk-' + side);
+  if (!b) return;
+  b.classList.toggle('on', !!on);
+  b.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+
+function speakStart(btnId, side, zh){
+  var tgt = speakTarget(side);
+  var raw = tgt.text == null ? '' : String(tgt.text);
+  /* 文本为空/纯空白（句子卡还在加载、译文没回来等）：不进 loading、不发 speak，入口保持 idle。
+     否则乐观 loading 之后 C# 只会回推 idle，万一事件丢失就会一直卡在 loading。 */
+  if (!raw.replace(/\s+/g, '')) return false;
+  readSide = side;
+  speakBtn = btnId;
+  lastSpoken = btnId;
+  window.__setSpeak('loading');   /* 乐观进 loading：C# 随后推 loading/playing，不会闪回 idle */
+  post({type:'speak', text: raw, zh: (zh == null) ? hasHan(raw) : !!zh});
+  return true;
+}
+
+/* 胶囊点击：非空闲 → 发 stop（等 C# 推 idle）；空闲 → 读当前 readSide 目标 */
+function onSpeak(id){
+  var b = byId(id);
+  if (!b || b.disabled) return;
+  if (speakState === 'loading' || speakState === 'playing') { post({type:'stop'}); return; }
+  var side = (cur.mode === 'word') ? 'w' : (readSide === 't' ? 't' : 's');
+  speakStart(id, side);
+}
+
+/* meta 语言 token 点击：直接读该侧。
+   播放中切到另一侧不发 stop（避免 C# 先推 idle 造成按钮闪回），直接发新 speak ——
+   C# 的 speak 处理会先乐观 loading，并按会话号让旧会话静默退出。点当前正在读的那侧 = 停止。
+   zh 按 token 的语言标记给（中 = true / 英 = false），与「英文 token 发 zh:false」的契约一致。 */
+function onToken(side){
+  if (cur.ok === false) return;
+  var active = (speakState === 'loading' || speakState === 'playing') && !!speakBtn;
+  if (active && readSide === side) { post({type:'stop'}); return; }
+  var t = byId('tk-' + side);
+  speakStart('rs', side, !!t && t.textContent === '中');
+}
+
+/* C# → 页面：状态变化时才调用。'idle' 一定是全部回到空闲 */
+window.__setSpeak = function(state){
+  var s = (state === 'loading' || state === 'playing') ? state : 'idle';
+  speakState = s;
+  if (s === 'idle') speakBtn = '';
+  else if (!speakBtn) speakBtn = lastSpoken
+    || (cur.mode === 'sentence' ? 'rs' : (cur.mode === 'word' ? 'rw' : ''));
+  paintSpeak();
+};
+
+/* 测量：只读布局尺寸（offsetHeight/offsetTop 不受入场 scale 动画影响，getBoundingClientRect 会受影响）。
+   窗口高度 = wrap 上下内边距 + inner 内容高度；超过 60% 工作区由 C# 夹住并在 .lg-scroll 内部滚动。 */
+function measure(){
+  requestAnimationFrame(function(){
+    var wrapEl = byId('wrap'), inner = byId('inner');
+    if (!wrapEl || !inner) return;
+    var cs = getComputedStyle(wrapEl);
+    var h = Math.ceil(inner.offsetHeight + (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)) + 1;
+    var trEl = byId('trunc');
+    if (trEl && trEl.classList.contains('lg-show')) {
+      var nat = wrapEl.scrollHeight + 2;
+      if (nat > h) h = nat;
+    }
+    if (h < 72) h = 72;
+    post({type:'height', v:h});
+  });
+}
+
+function setGlassMode(mode){
+  var n = Math.max(0, Math.min(2, parseInt(mode, 10) || 0));
+  document.body.classList.remove('mode-0','mode-1','mode-2');
+  document.body.classList.add('mode-' + n);
+}
+
+/* C# 每次出现/重新取词时推新截屏 + 档位过来（不重载页面，脚本状态/滚动位置都保留）。
+   这是本平台“真玻璃”的来源：抓帧贴图等价实现浏览器里 backdrop-filter 才能做到的背后模糊。 */
+window.__setGlass = function(b64, mode){
+  var el = byId('lg-bg');
+  if (b64) {
+    if (el) el.style.backgroundImage = 'url(data:image/png;base64,' + b64 + ')';
+    document.body.classList.remove('nobackdrop');
+  } else {
+    document.body.classList.add('nobackdrop');   /* 抓帧失败 → 纯色兜底 */
+  }
+  setGlassMode(mode);
+};
+
+/* 出现 / 新取词：内容 160ms 入场（scale .96→1 + 上移 4px）。
+   结果到达只走 __inResult（120ms 淡入，不缩放）——由 C# 决定什么时候播哪一种。
+   __shownAt 用来记录入场动画的起点：结果若在入场没播完就回来（离线词库/缓存命中常见），
+   __inResult 直接跳过，让结果跟着入场一起出现，避免一次“回闪”。 */
+window.__in = function(){
+  window.__shownAt = (window.performance && performance.now) ? performance.now() : (new Date()).getTime();
+  var inner = byId('inner');
+  if (!inner) return;
+  var body = byId('body');
+  if (body) body.classList.remove('lg-res');   // 作废还没播完的结果淡入，避免叠两层淡入
+  inner.classList.remove('lg-in');
+  void inner.offsetWidth;
+  inner.classList.add('lg-in');
+};
+window.__inResult = function(){
+  /* 入场 160ms 还没播完（阈值 180ms）：结果直接随入场出现，不再单独淡入一次 */
+  if (window.__shownAt) {
+    var now = (window.performance && performance.now) ? performance.now() : (new Date()).getTime();
+    if (now - window.__shownAt < 180) return;
+  }
+  var body = byId('body');
+  if (!body) return;
+  body.classList.remove('lg-res');
+  void body.offsetWidth;
+  body.classList.add('lg-res');
+};
+
+window.__setTruncated = function(on){
+  var el = byId('trunc');
+  if (!el) return;
+  el.classList.toggle('lg-show', !!on);
+  document.body.classList.toggle('truncated', !!on);
+  measure();
+};
+
+window.__setPin = function(on){
+  pinned = !!on;
+  document.body.classList.toggle('pinned', pinned);
+  var b = byId('pin');
+  b.classList.toggle('on', pinned);
+  b.title = pinned ? '取消固定' : '固定到屏幕';
+};
+
+/* meta 渲染：句子卡把方向「英 → 中」拆成两个可点语言 token；「→」与后面的
+   「· Google · 380 ms」保持纯文本。meta 不匹配 ^[英中]\s*→\s*[英中]（异常兜底）
+   → 退化为不可点纯文本，胶囊默认读外语原文（zh 按是否中文判断）。 */
+function txtSpan(cls, text){
+  var s = document.createElement('span');
+  s.className = cls;
+  s.textContent = text;
+  return s;
+}
+function tokenBtn(side, ch){
+  var b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'lg-tk';
+  b.id = 'tk-' + side;
+  b.textContent = ch;
+  var label = side === 's' ? '朗读原文' : '朗读译文';
+  b.title = label;
+  b.setAttribute('aria-label', label);
+  b.setAttribute('aria-pressed', 'false');
+  b.onclick = function(){ onToken(side); };
+  return b;
+}
+function renderMeta(){
+  var el = byId('meta');
+  el.textContent = '';
+  if (cur.mode === 'word') {
+    /* 单词卡没有第二语言入口：只显示词典来源，不出现任何 英/中 token */
+    if (cur.provider) {
+      el.appendChild(txtSpan('lg-meta-tx',
+        cur.provider + (cur.ms > 0 ? ' · ' + cur.ms + ' ms' : '')));
+    }
+    return;
+  }
+  var m = (cur.meta == null) ? '' : String(cur.meta);
+  var dir = /^([英中])\s*→\s*([英中])/.exec(m);
+  /* 默认朗读对象 = 外语侧：英→中 默认原文(en)，中→英 默认译文(en)；解析不出方向退回原文。
+     正在朗读时（含播放中数据重建）保持用户刚选的语向，不在此处覆盖。 */
+  var speaking = (speakState === 'loading' || speakState === 'playing') && !!speakBtn;
+  if (!dir) {
+    /* 异常兜底：方向拆不出来 → 纯文本、不可点，胶囊默认读原文（zh 按是否中文判断） */
+    if (!speaking) readSide = 's';
+    if (m) el.appendChild(txtSpan('lg-meta-tx', m));
+    return;
+  }
+  if (!speaking) readSide = (dir[1] === '英') ? 's' : 't';
+  var box = document.createElement('span');
+  box.className = 'lg-dir';
+  box.appendChild(tokenBtn('s', dir[1]));       /* 左侧 = 原文 */
+  box.appendChild(txtSpan('lg-arr', '→'));
+  box.appendChild(tokenBtn('t', dir[2]));       /* 右侧 = 译文 */
+  el.appendChild(box);
+  var rest = m.slice(dir[0].length);
+  if (rest) el.appendChild(txtSpan('lg-meta-rest', rest));
+  if (cur.ok === false) {
+    var ts = el.querySelectorAll('.lg-tk');
+    for (var i = 0; i < ts.length; i++) ts[i].disabled = true;
+  }
+}
+
+function renderFoot(mode){
+  var foot = byId('foot');
+  var reads = byId('reads');
+  foot.style.display = 'flex';
+  /* 底栏重建 ≠ 朗读结束：固定卡片继续翻译、悬停卡片保持打开时都会拿到新数据而重建入口，
+     但音频可能还在播。所以先记住当前朗读目标，重建后：
+       - 主胶囊 id 仍存在且可点 → 把 loading/playing 外观接回去（保留停止入口）；
+       - 模式互换（rw ↔ rs）或失败置灰 → 发 stop 让 C# 停掉，页面回 idle。
+     回空闲的唯一信号仍然是 C# 的 window.__setSpeak('idle')（C# 新取词会先 Stop 再推 idle）。 */
+  var keepState = speakState, keepBtn = speakBtn, keepLast = lastSpoken, keepSide = readSide;
+  reads.innerHTML = '';
+  speakState = 'idle'; speakBtn = ''; lastSpoken = '';
+  if (mode === 'word') {
+    readSide = 'w';
+    reads.innerHTML = speakPillHtml('rw', '朗读');
+    var rw = byId('rw');
+    if (rw) rw.onclick = function(){ onSpeak('rw'); };
+  } else {
+    if (readSide !== 's' && readSide !== 't') readSide = 's';
+    reads.innerHTML = speakPillHtml('rs', '朗读');
+    var rs = byId('rs');
+    if (rs) rs.onclick = function(){ onSpeak('rs'); };
+    if (cur.ok === false) {
+      /* 失败态：没有可读的译文，主入口置灰（opacity .45 / pointer-events:none / cursor default） */
+      rs.disabled = true;
+      rs.classList.add('lg-rd-off');
+    }
+  }
+  if (keepBtn && (keepState === 'loading' || keepState === 'playing')) {
+    var kept = byId(keepBtn);
+    if (kept && !kept.disabled && !kept.classList.contains('lg-rd-off')) {
+      speakState = keepState;
+      speakBtn = keepBtn;
+      lastSpoken = keepLast || keepBtn;
+      readSide = keepSide;   /* token accent 与胶囊目标跟着朗读侧一起保留，重建不丢态 */
+    } else {
+      speakState = 'idle'; speakBtn = ''; lastSpoken = '';
+      post({type:'stop'});   /* 入口没了/不可点：停掉旧朗读，避免出现够不着的停止入口 */
+    }
+  }
+  paintSpeak();
+}
+
+window.__setData = function(d){
+  cur = d || {};
+  var c = byId('content');
+  var foot = byId('foot');
+  byId('star').style.display = 'flex';
+  byId('meta').textContent = '';
+  foot.style.display = 'none';
+  /* 新一轮取词（pending）回到默认朗读对象：句子读原文、单词读单词；
+     同一轮内的数据更新（播放中刷新）保持用户刚选的语向。 */
+  if (cur.mode === 'word') readSide = 'w';
+  else if (cur.pending) readSide = 's';
+
+  if (cur.mode === 'word') {
+    var h = '<div class="lg-word">' + esc(cur.word) + '</div>';
+    if (cur.phonetic) h += '<div class="lg-phon">/' + esc(cur.phonetic) + '</div>';
+    h += '<div class="lg-hr"></div>';
+    if (cur.groups && cur.groups.length) {
+      for (var i = 0; i < cur.groups.length; i++) {
+        var g = cur.groups[i];
+        if (g.pos) h += '<div class="lg-pos">' + esc(g.pos) + '</div>';
+        for (var j = 0; j < g.senses.length; j++)
+          h += '<div class="lg-sense"><span class="lg-dot"></span><span>' + esc(g.senses[j]) + '</span></div>';
+      }
+    } else if (cur.pending) {
+      h += '<div class="lg-loading"><span class="lg-dots"><i></i><i></i><i></i></span></div>';
+    } else {
+      h += '<div class="lg-empty">没查到这个词的解释。</div>';
+    }
+    c.innerHTML = h;
+    renderMeta();
+    renderFoot('word');
+    byId('star').title = '收藏到生词本';
+  } else {
+    /* 加载 → 三点；失败 → 说明块（不再拿 16.5px 当译文）；成功 → 译文 */
+    var body;
+    if (cur.pending) {
+      body = '<div class="lg-loading"><span class="lg-dots"><i></i><i></i><i></i></span></div>';
+    } else if (cur.ok === false) {
+      body = '<div class="lg-error"><div class="lg-error-t">翻译未完成</div>' +
+             '<div class="lg-error-d">' + esc(cur.translation) + '</div></div>';
+    } else {
+      body = '<div class="lg-tr">' + esc(cur.translation) + '</div>';
+    }
+    c.innerHTML = '<div class="lg-src">' + esc(cur.source) + '</div>' +
+                  '<div class="lg-hr"></div>' + body;
+    renderMeta();
+    renderFoot('sentence');
+    byId('star').title = '收藏这句话';
+  }
+
+  /* 不整页 Reload：新内容把滚动位置拉回顶部；入场动画由 C# 按场景调度（__in / __inResult） */
+  var wrapEl = byId('wrap');
+  if (wrapEl) wrapEl.scrollTop = 0;
+  measure();
+};
+
+/* 旧接口 window.__setSpeaking(on) 已由三态 window.__setSpeak(state) 取代：
+   C# 侧状态变化统一走 __setSpeak('loading' | 'playing' | 'idle')。 */
+
+window.__setStar = function(on){
+  byId('star').classList.toggle('lg-on-star', !!on);
+};
+
+function toast(msg, onClick){
+  var el = byId('toast');
+  el.textContent = msg;
+  el.classList.add('lg-show');
+  if (onClick) { el.style.pointerEvents = 'auto'; el.style.cursor = 'pointer'; el.onclick = function(){ onClick(); el.classList.remove('lg-show'); }; }
+  else { el.style.pointerEvents = 'none'; el.style.cursor = 'default'; el.onclick = null; }
+  clearTimeout(window.__tt);
+  window.__tt = setTimeout(function(){ el.classList.remove('lg-show'); el.onclick = null; }, onClick ? 3200 : 1300);
+}
+window.__toastStar = function(){ toast('已收藏 · 点此查看', function(){ post({type:'records', tab:'vocab'}); }); };
+window.__toastUnstar = function(){ toast('已取消收藏'); };
+window.__toastCopy = function(ok){ toast(ok ? '已复制' : '复制失败，请重试'); };
+
+/* 复制成功：复制图标临时切成绿色对勾（1.6 圆端点），1200ms 后复原；失败保持原图标 */
+window.__copyOk = function(ok){
+  if (!ok) return;
+  var b = byId('copy');
+  if (!b) return;
+  try { b.classList.add('lg-ok'); b.innerHTML = ICON_CHECK; } catch (e) { return; }
+  clearTimeout(window.__ck);
+  window.__ck = setTimeout(function(){
+    try { b.classList.remove('lg-ok'); b.innerHTML = ICON_COPY; } catch (e) { }
+  }, 1200);
+};
+
+byId('star').onclick = function(){
+  var on = byId('star').classList.contains('lg-on-star');
+  post({type: on ? 'unstar' : 'star'});
+};
+byId('records').onclick = function(){ post({type:'records', tab:'history'}); };
+byId('close').onclick = function(){ post({type:'close'}); };
+byId('pin').onclick = function(){ post({type:'pin'}); };
+byId('copy').onclick = function(){
+  var t = '';
+  if (cur.mode === 'word') {
+    t = (cur.word || '') + (cur.phonetic ? '  /' + cur.phonetic + '/' : '');
+    (cur.groups || []).forEach(function(g){
+      t += '\n' + (g.pos || '') + '\n' + g.senses.map(function(s){ return '· ' + s; }).join('\n');
+    });
+  } else {
+    t = cur.translation || '';
+  }
+  post({type:'copy', text:t});
+};
+
+/* 拖拽：顶部 44px 空白区（按钮除外）+ 顶部拖拽条 */
+byId('wrap').addEventListener('mousedown', function(e){
+  if (e.target.closest('.lg-ic') || e.target.closest('.lg-rd')) return;
+  if (e.clientY < 44) post({type:'drag'});
+});
+byId('grab').addEventListener('mousedown', function(e){
+  if (e.button === 0) post({type:'drag'});
+});
+window.addEventListener('resize', measure);
+
+/* 滚动条只在滚动时出现：滚动结束后 800ms 收起（不占位、不闪） */
+(function(){
+  var wrapEl = byId('wrap');
+  if (!wrapEl) return;
+  wrapEl.addEventListener('scroll', function(){
+    wrapEl.classList.add('scrolling');
+    clearTimeout(window.__sc);
+    window.__sc = setTimeout(function(){ wrapEl.classList.remove('scrolling'); }, 800);
+  });
+})();
+
+/* 主题兜底：C# 正常情况下会带 light/dark class；没带时跟随系统 prefers-color-scheme */
+(function(){
+  if (!window.matchMedia) return;
+  var hasTheme = document.body.classList.contains('dark') || document.body.classList.contains('light');
+  if (hasTheme) return;
+  var mq = window.matchMedia('(prefers-color-scheme: dark)');
+  document.body.classList.add(mq.matches ? 'dark' : 'light');
+  if (mq.addEventListener) mq.addEventListener('change', function(e){
+    document.body.classList.toggle('dark', e.matches);
+    document.body.classList.toggle('light', !e.matches);
+  });
+})();
+
+post({type:'ready'});
+</script>
+</body>
+</html>
